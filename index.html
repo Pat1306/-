@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Posture Alert - ระบบตรวจจับท่านั่ง</title>
+    
+    <!-- ฟอนต์ภาษาไทย -->
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Kanit', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- TensorFlow.js และ Teachable Machine Library -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8/dist/teachablemachine-image.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/pose@0.8/dist/teachablemachine-pose.min.js"></script>
+
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        body {
+            background-color: #f8fafc;
+        }
+        #webcam-container canvas {
+            width: 100%;
+            max-width: 400px;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            margin: 0 auto;
+            transform: scaleX(-1); /* กลับซ้ายขวาให้เหมือนกระจก */
+        }
+        .pulse-red {
+            animation: pulse-red 2s infinite;
+        }
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+    </style>
+</head>
+<body class="text-slate-800 min-h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-white shadow-sm py-4 mb-6">
+        <div class="max-w-5xl mx-auto px-4 flex items-center justify-center gap-3">
+            <div class="bg-indigo-600 text-white p-2 rounded-lg">
+                <i class="fa-solid fa-user-doctor text-xl"></i>
+            </div>
+            <h1 class="text-2xl font-semibold text-slate-800">Smart Posture Alert</h1>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-5xl mx-auto px-4 w-full flex-grow flex flex-col md:flex-row gap-6 pb-10">
+        
+        <!-- ซ้าย: ตั้งค่าและสถานะ -->
+        <div class="w-full md:w-1/2 flex flex-col gap-6">
+            
+            <!-- การควบคุมกล้องและเสียง -->
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                <h2 class="text-lg font-medium mb-4 flex items-center gap-2">
+                    <i class="fa-solid fa-video text-slate-400"></i> การควบคุมการทำงาน
+                </h2>
+                
+                <!-- เลือกคลาสที่แปลว่าหลังค่อม -->
+                <div id="class-selector-container" class="mb-4 hidden p-4 bg-slate-50 rounded-lg border border-slate-200">
+                    <label class="block text-sm text-slate-600 mb-2 font-medium text-indigo-700">เลือกคลาสที่หมายถึง "หลังค่อม"</label>
+                    <select id="bad-posture-class" class="w-full px-4 py-2 border border-slate-300 rounded-lg outline-none text-sm">
+                        <!-- ตัวเลือกจะถูกเติมด้วย Javascript -->
+                    </select>
+                </div>
+
+                <div class="flex gap-3 mb-4">
+                    <button id="start-btn" onclick="startCamera()" disabled class="flex-1 bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-medium py-2.5 rounded-lg transition-colors flex justify-center items-center gap-2">
+                        <i class="fa-solid fa-play"></i> เริ่มต้น
+                    </button>
+                    <button id="stop-btn" onclick="stopCamera()" disabled class="flex-1 bg-rose-500 hover:bg-rose-600 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-medium py-2.5 rounded-lg transition-colors flex justify-center items-center gap-2">
+                        <i class="fa-solid fa-stop"></i> หยุด
+                    </button>
+                </div>
+
+                <div class="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-volume-high text-slate-500"></i>
+                        <span class="text-sm font-medium text-slate-700">ทดสอบเสียงแจ้งเตือน</span>
+                    </div>
+                    <button onclick="playBeep()" class="text-indigo-600 text-sm hover:underline font-medium">ทดสอบ</button>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- ขวา: แสดงผลกล้องและสถานะ -->
+        <div class="w-full md:w-1/2 flex flex-col gap-6">
+            
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 h-full flex flex-col items-center justify-center text-center">
+                
+                <!-- สถานะการทำงาน -->
+                <div id="status-card" class="w-full py-4 px-6 rounded-xl bg-slate-100 text-slate-500 mb-6 transition-all duration-300">
+                    <div id="status-icon" class="text-4xl mb-2"><i class="fa-solid fa-circle-info"></i></div>
+                    <h3 id="status-text" class="text-xl font-bold">รอการเชื่อมต่อ</h3>
+                    <p id="status-subtext" class="text-sm mt-1 opacity-80">กรุณาโหลดโมเดลและเปิดกล้อง</p>
+                </div>
+
+                <!-- กล้อง -->
+                <div id="webcam-container" class="w-full bg-slate-100 rounded-xl overflow-hidden flex items-center justify-center min-h-[300px] border border-slate-200">
+                    <div id="webcam-placeholder" class="text-slate-400 flex flex-col items-center">
+                        <i class="fa-solid fa-camera text-4xl mb-2"></i>
+                        <span>พื้นที่แสดงภาพจากกล้อง</span>
+                    </div>
+                </div>
+                
+                <!-- แถบความมั่นใจของ AI -->
+                <div id="label-container" class="w-full mt-6 space-y-2 text-left hidden">
+                <!-- จะถูกเติมด้วย Javascript -->
+            </div>
+
+        </div>
+
+    </div>
+
+</main>
+
+<script>
+    // ตัวแปรระบบ
+    let model, webcam, ctx, labelContainer, maxPredictions;
+    let isRunning = false;
+    let modelType = "image"; // ตรวจจับว่าเป็น image หรือ pose
+    
+    // ตัวแปรระบบเสียง
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        let lastBeepTime = 0;
+        const BEEP_INTERVAL = 3000; // แจ้งเตือนทุกๆ 3 วินาทีหากยังนั่งค่อมอยู่
+
+        // ระบบเสียงแจ้งเตือน (สร้างเสียงปี๊บด้วย Web Audio API)
+        function playBeep() {
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(600, audioCtx.currentTime); // ความถี่เสียง 600Hz
+            oscillator.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.1);
+            
+            gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+            gainNode.gain.linearRampToValueAtTime(0.5, audioCtx.currentTime + 0.05);
+            gainNode.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.3); // ความยาวเสียง 0.3 วินาที
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            oscillator.start(audioCtx.currentTime);
+            oscillator.stop(audioCtx.currentTime + 0.3);
+        }
+
+        // โหลดโมเดลอัตโนมัติ
+        async function loadModel() {
+            const URL = "https://teachablemachine.withgoogle.com/models/KKEGvB-Zc/";
+            const modelURL = URL + "model.json";
+            const metadataURL = URL + "metadata.json";
+
+            try {
+                updateStatusUI("idle", "กำลังโหลดโมเดล AI...", "กรุณารอสักครู่ ระบบกำลังเตรียมความพร้อม");
+
+                // ตรวจสอบประเภทโมเดลจาก metadata (Image หรือ Pose)
+                const response = await fetch(metadataURL);
+                const metadata = await response.json();
+                
+                if (metadata.packageName === "@teachablemachine/pose") {
+                    modelType = "pose";
+                    model = await tmPose.load(modelURL, metadataURL);
+                } else {
+                    modelType = "image";
+                    model = await tmImage.load(modelURL, metadataURL);
+                }
+                
+                maxPredictions = model.getTotalClasses();
+
+                // นำชื่อคลาสมาใส่ใน Dropdown เพื่อให้ผู้ใช้เลือกคลาส "หลังค่อม"
+                const classSelector = document.getElementById("bad-posture-class");
+                classSelector.innerHTML = '';
+                const classes = model.getClassLabels();
+                
+                classes.forEach((className, index) => {
+                    const option = document.createElement("option");
+                    option.value = className;
+                    option.text = className;
+                    // พยายามเดาว่าอันไหนคือหลังค่อม
+                    if(className.toLowerCase().includes("bad") || className.toLowerCase().includes("ค่อม")) {
+                        option.selected = true;
+                    }
+                    classSelector.appendChild(option);
+                });
+
+                document.getElementById("class-selector-container").classList.remove("hidden");
+                
+                // เปิดปุ่มเริ่มกล้อง
+                document.getElementById("start-btn").disabled = false;
+                
+                updateStatusUI("idle", "โหลดโมเดลสำเร็จ", "กดปุ่ม 'เริ่มต้น' เพื่อเปิดกล้อง");
+
+            } catch (error) {
+                console.error(error);
+                updateStatusUI("error", "เกิดข้อผิดพลาด", "ไม่สามารถโหลดโมเดลได้ โปรดรีเฟรชหน้าเว็บ");
+            }
+        }
+
+        // เรียกใช้โหลดโมเดลทันทีที่หน้าเว็บโหลดเสร็จ
+        window.addEventListener('DOMContentLoaded', loadModel);
+
+        // เริ่มกล้องและเริ่มระบบ
+        async function startCamera() {
+            if(!model) return;
+
+            const startBtn = document.getElementById("start-btn");
+            const stopBtn = document.getElementById("stop-btn");
+            const container = document.getElementById("webcam-container");
+            const placeholder = document.getElementById("webcam-placeholder");
+
+            startBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> กำลังเปิดกล้อง...';
+            startBtn.disabled = true;
+
+            const flip = true; // กลับซ้ายขวา
+            
+            // เลือกใช้ Webcam ตามประเภทโมเดล
+            if (modelType === "pose") {
+                webcam = new tmPose.Webcam(400, 400, flip);
+            } else {
+                webcam = new tmImage.Webcam(400, 400, flip); 
+            }
+            
+            try {
+                await webcam.setup(); // ขอสิทธิ์ใช้งานกล้อง
+                await webcam.play();
+                isRunning = true;
+                window.requestAnimationFrame(loop);
+
+                // นำ Canvas เข้าไปในเว็บ
+                placeholder.style.display = 'none';
+                container.innerHTML = ''; // ล้างอันเก่าถ้ามี
+                container.appendChild(webcam.canvas);
+                
+                // เตรียม context สำหรับวาดเส้นโครงร่าง (ถ้าเป็น Pose)
+                if (modelType === "pose") {
+                    ctx = webcam.canvas.getContext('2d');
+                }
+                
+                // สร้างพื้นที่แสดงผลลัพธ์ % ของ AI
+                labelContainer = document.getElementById("label-container");
+                labelContainer.classList.remove("hidden");
+                labelContainer.innerHTML = '';
+                for (let i = 0; i < maxPredictions; i++) {
+                    const barDiv = document.createElement("div");
+                    barDiv.className = "flex items-center gap-2 text-sm";
+                    barDiv.innerHTML = `
+                        <span class="w-24 truncate font-medium">${model.getClassLabels()[i]}</span>
+                        <div class="flex-grow bg-slate-200 rounded-full h-2.5">
+                            <div class="bg-indigo-600 h-2.5 rounded-full transition-all duration-100" style="width: 0%" id="bar-${i}"></div>
+                        </div>
+                        <span class="w-12 text-right" id="percent-${i}">0%</span>
+                    `;
+                    labelContainer.appendChild(barDiv);
+                }
+
+                stopBtn.disabled = false;
+                startBtn.innerHTML = '<i class="fa-solid fa-play"></i> กำลังทำงาน';
+                
+                // อัปเดต UI ว่าทำงานอยู่
+                updateStatusUI("normal", "กำลังตรวจจับ", "วิเคราะห์ท่านั่งแบบเรียลไทม์");
+
+            } catch(e) {
+                console.error(e);
+                alert("ไม่สามารถเปิดกล้องได้ กรุณาตรวจสอบสิทธิ์การเข้าถึงกล้องเบราว์เซอร์");
+                startBtn.innerHTML = '<i class="fa-solid fa-play"></i> เริ่มต้น';
+                startBtn.disabled = false;
+            }
+        }
+
+        // ลูปการทำงานอัปเดตเฟรมจากกล้องไปประมวลผล
+        async function loop() {
+            if(!isRunning) return;
+            webcam.update(); // ดึงภาพเฟรมใหม่
+            await predict(); // วิเคราะห์ภาพ
+            window.requestAnimationFrame(loop); // วนลูปต่อเนื่อง
+        }
+
+        // วิเคราะห์ภาพด้วยโมเดล
+    async function predict() {
+        let prediction;
+        
+        // วิเคราะห์ตามประเภทโมเดล
+        if (modelType === "pose") {
+            const { pose, posenetOutput } = await model.estimatePose(webcam.canvas);
+            prediction = await model.predict(posenetOutput);
+            
+            // วาดเส้นโครงร่าง (Skeleton) ทับลงบนวิดีโอ
+            if (pose) {
+                const minPartConfidence = 0.5;
+                tmPose.drawKeypoints(pose.keypoints, minPartConfidence, ctx);
+                tmPose.drawSkeleton(pose.keypoints, minPartConfidence, ctx);
+            }
+        } else {
+            prediction = await model.predict(webcam.canvas);
+        }
+        
+        const badPostureClassLabel = document.getElementById("bad-posture-class").value;
+        let isBadPosture = false;
+
+        for (let i = 0; i < maxPredictions; i++) {
+                const prob = prediction[i].probability;
+                const percent = Math.round(prob * 100);
+                
+                // อัปเดตกราฟแท่ง
+                document.getElementById(`bar-${i}`).style.width = percent + "%";
+                document.getElementById(`percent-${i}`).innerText = percent + "%";
+
+                // เช็คว่าเป็นคลาสที่แปลว่าหลังค่อมหรือไม่ และความน่าจะเป็นสูงพอไหม (เช่น > 70%)
+                if (prediction[i].className === badPostureClassLabel && prob > 0.70) {
+                    isBadPosture = true;
+                }
+            }
+
+            // จัดการ UI การแจ้งเตือนและเสียง
+            handleAlert(isBadPosture);
+        }
+
+        function handleAlert(isBadPosture) {
+            const statusCard = document.getElementById("status-card");
+            const webcamCanvas = document.querySelector("#webcam-container canvas");
+            
+            if (isBadPosture) {
+                // UI: สถานะอันตราย (สีแดง)
+                statusCard.className = "w-full py-4 px-6 rounded-xl bg-rose-100 text-rose-600 mb-6 transition-all duration-300 pulse-red";
+                document.getElementById("status-icon").innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i>';
+                document.getElementById("status-text").innerText = "นั่งหลังค่อมแล้ว!";
+                document.getElementById("status-subtext").innerText = "ยืดหลังตรงหน่อยครับ";
+                
+                if (webcamCanvas) webcamCanvas.style.border = "4px solid #ef4444";
+
+                // แจ้งเตือนเสียงตามระยะเวลาที่กำหนด (BEEP_INTERVAL)
+                const now = Date.now();
+                if (now - lastBeepTime > BEEP_INTERVAL) {
+                    playBeep();
+                    lastBeepTime = now;
+                }
+
+            } else {
+                // UI: สถานะปกติ (สีเขียว)
+                updateStatusUI("normal", "ท่านั่งปกติ", "เยี่ยมมาก! รักษาท่านั่งนี้ไว้");
+                if (webcamCanvas) webcamCanvas.style.border = "4px solid #10b981";
+            }
+        }
+
+        function updateStatusUI(type, title, subtext) {
+            const statusCard = document.getElementById("status-card");
+            
+            if (type === "normal") {
+                statusCard.className = "w-full py-4 px-6 rounded-xl bg-emerald-100 text-emerald-600 mb-6 transition-all duration-300";
+                document.getElementById("status-icon").innerHTML = '<i class="fa-regular fa-face-smile"></i>';
+            } else if (type === "idle") {
+                statusCard.className = "w-full py-4 px-6 rounded-xl bg-slate-100 text-slate-500 mb-6 transition-all duration-300";
+                document.getElementById("status-icon").innerHTML = '<i class="fa-solid fa-video-slash"></i>';
+            } else if (type === "error") {
+                statusCard.className = "w-full py-4 px-6 rounded-xl bg-rose-100 text-rose-600 mb-6 transition-all duration-300";
+                document.getElementById("status-icon").innerHTML = '<i class="fa-solid fa-circle-xmark"></i>';
+            }
+            
+            document.getElementById("status-text").innerText = title;
+            document.getElementById("status-subtext").innerText = subtext;
+        }
+
+        // หยุดกล้องและระบบ
+        function stopCamera() {
+            isRunning = false;
+            if(webcam) {
+                webcam.stop();
+            }
+            
+            document.getElementById("start-btn").disabled = false;
+            document.getElementById("start-btn").innerHTML = '<i class="fa-solid fa-play"></i> เริ่มต้น';
+            document.getElementById("stop-btn").disabled = true;
+            
+            const container = document.getElementById("webcam-container");
+            container.innerHTML = `
+                <div id="webcam-placeholder" class="text-slate-400 flex flex-col items-center">
+                    <i class="fa-solid fa-camera text-4xl mb-2"></i>
+                    <span>กล้องถูกปิดใช้งาน</span>
+                </div>
+            `;
+            
+            document.getElementById("label-container").classList.add("hidden");
+            updateStatusUI("idle", "หยุดการตรวจจับ", "กดปุ่มเริ่มต้นเพื่อเปิดกล้องใหม่");
+        }
+    </script>
+</body>
+</html>
