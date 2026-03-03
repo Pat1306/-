@@ -106,7 +106,7 @@
 
             <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
                 <span class="text-sm font-medium">เช็คระบบเสียง:</span>
-                <button onclick="playBeep(); speakAlert('นั่งตรงๆไอ่สัด');" class="bg-indigo-100 text-indigo-600 px-4 py-1.5 rounded-lg text-sm font-bold hover:bg-indigo-200 transition-all">
+                <button onclick="playBeep(); speakAlert('กรุณานั่งตัวตรงค่ะ');" class="bg-indigo-100 text-indigo-600 px-4 py-1.5 rounded-lg text-sm font-bold hover:bg-indigo-200 transition-all">
                     ทดสอบเสียง
                 </button>
             </div>
@@ -374,7 +374,7 @@
                 sSub.innerText = "คำแนะนำ: ยืดตัวตรงทันที";
                 const now = Date.now();
                 if (now - lastBeepTime > BEEP_INTERVAL) {
-                    playBeep(); speakAlert("นั่งหลังค่อม"); lastBeepTime = now;
+                    playBeep(); speakAlert("กรุณานั่งตัวตรงด้วยค่ะ"); lastBeepTime = now;
                 }
             } else {
                 card.className = "bg-emerald-50 p-6 rounded-2xl shadow-sm border border-emerald-200 text-center";
